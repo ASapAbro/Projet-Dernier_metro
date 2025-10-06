@@ -1,0 +1,242 @@
+{
+  "dashboard": {
+    "id": null,
+    "title": "API Dernier Metro Paris - Production",
+    "tags": ["dernier-metro", "api", "production"],
+    "style": "dark",
+    "timezone": "Europe/Paris",
+    "editable": true,
+    "gnetId": null,
+    "graphTooltip": 1,
+    "hideControls": false,
+    "links": [],
+    "refresh": "30s",
+    "schemaVersion": 37,
+    "version": 1,
+    "templating": {
+      "list": [
+        {
+          "name": "instance",
+          "type": "query",
+          "query": "label_values(up{job=\"dernier-metro-api\"}, instance)",
+          "refresh": 1,
+          "includeAll": false,
+          "multi": false
+        }
+      ]
+    },
+    "time": {
+      "from": "now-1h",
+      "to": "now"
+    },
+    "panels": [
+      {
+        "id": 1,
+        "title": "🚀 API Status Overview",
+        "type": "stat",
+        "gridPos": {"h": 4, "w": 24, "x": 0, "y": 0},
+        "fieldConfig": {
+          "defaults": {
+            "color": {"mode": "thresholds"},
+            "thresholds": {
+              "steps": [
+                {"color": "red", "value": 0},
+                {"color": "green", "value": 1}
+              ]
+            },
+            "unit": "none"
+          }
+        },
+        "targets": [
+          {
+            "expr": "up{job=\"dernier-metro-api\"}",
+            "legendFormat": "API Status",
+            "refId": "A"
+          },
+          {
+            "expr": "rate(http_requests_total{job=\"dernier-metro-api\"}[5m])",
+            "legendFormat": "Requests/sec",
+            "refId": "B"
+          },
+          {
+            "expr": "histogram_quantile(0.95, rate(http_request_duration_seconds_bucket{job=\"dernier-metro-api\"}[5m]))",
+            "legendFormat": "95th percentile latency",
+            "refId": "C"
+          }
+        ]
+      },
+      {
+        "id": 2,
+        "title": "📊 Request Rate & Latency",
+        "type": "graph",
+        "gridPos": {"h": 8, "w": 12, "x": 0, "y": 4},
+        "yAxes": [
+          {"label": "Requests/sec", "min": 0},
+          {"label": "Latency (s)", "min": 0}
+        ],
+        "targets": [
+          {
+            "expr": "rate(http_requests_total{job=\"dernier-metro-api\"}[5m])",
+            "legendFormat": "Total Requests/sec",
+            "refId": "A"
+          },
+          {
+            "expr": "rate(http_requests_total{job=\"dernier-metro-api\",status=~\"2..\"}[5m])",
+            "legendFormat": "2xx Requests/sec",
+            "refId": "B"
+          },
+          {
+            "expr": "rate(http_requests_total{job=\"dernier-metro-api\",status=~\"4..\"}[5m])",
+            "legendFormat": "4xx Requests/sec",
+            "refId": "C"
+          },
+          {
+            "expr": "rate(http_requests_total{job=\"dernier-metro-api\",status=~\"5..\"}[5m])",
+            "legendFormat": "5xx Requests/sec",
+            "refId": "D"
+          }
+        ]
+      },
+      {
+        "id": 3,
+        "title": "⚡ Response Time Percentiles",
+        "type": "graph",
+        "gridPos": {"h": 8, "w": 12, "x": 12, "y": 4},
+        "yAxes": [
+          {"label": "Time (s)", "min": 0}
+        ],
+        "targets": [
+          {
+            "expr": "histogram_quantile(0.50, rate(http_request_duration_seconds_bucket{job=\"dernier-metro-api\"}[5m]))",
+            "legendFormat": "50th percentile",
+            "refId": "A"
+          },
+          {
+            "expr": "histogram_quantile(0.90, rate(http_request_duration_seconds_bucket{job=\"dernier-metro-api\"}[5m]))",
+            "legendFormat": "90th percentile",
+            "refId": "B"
+          },
+          {
+            "expr": "histogram_quantile(0.95, rate(http_request_duration_seconds_bucket{job=\"dernier-metro-api\"}[5m]))",
+            "legendFormat": "95th percentile",
+            "refId": "C"
+          },
+          {
+            "expr": "histogram_quantile(0.99, rate(http_request_duration_seconds_bucket{job=\"dernier-metro-api\"}[5m]))",
+            "legendFormat": "99th percentile",
+            "refId": "D"
+          }
+        ]
+      },
+      {
+        "id": 4,
+        "title": "💾 Resource Usage",
+        "type": "graph",
+        "gridPos": {"h": 8, "w": 12, "x": 0, "y": 12},
+        "yAxes": [
+          {"label": "CPU %", "min": 0, "max": 100},
+          {"label": "Memory MB", "min": 0}
+        ],
+        "targets": [
+          {
+            "expr": "rate(process_cpu_seconds_total{job=\"dernier-metro-api\"}[5m]) * 100",
+            "legendFormat": "CPU Usage %",
+            "refId": "A"
+          },
+          {
+            "expr": "process_resident_memory_bytes{job=\"dernier-metro-api\"} / 1024 / 1024",
+            "legendFormat": "Memory Usage MB",
+            "refId": "B"
+          }
+        ]
+      },
+      {
+        "id": 5,
+        "title": "🗄️ Database Metrics",
+        "type": "graph",
+        "gridPos": {"h": 8, "w": 12, "x": 12, "y": 12},
+        "yAxes": [
+          {"label": "Connections", "min": 0},
+          {"label": "Queries/sec", "min": 0}
+        ],
+        "targets": [
+          {
+            "expr": "pg_stat_activity_count",
+            "legendFormat": "Active Connections",
+            "refId": "A"
+          },
+          {
+            "expr": "rate(pg_stat_database_xact_commit{datname=\"dernier_metro_prod\"}[5m])",
+            "legendFormat": "Commits/sec",
+            "refId": "B"
+          },
+          {
+            "expr": "rate(pg_stat_database_xact_rollback{datname=\"dernier_metro_prod\"}[5m])",
+            "legendFormat": "Rollbacks/sec",
+            "refId": "C"
+          }
+        ]
+      },
+      {
+        "id": 6,
+        "title": "🌐 HTTP Status Codes Distribution",
+        "type": "piechart",
+        "gridPos": {"h": 8, "w": 8, "x": 0, "y": 20},
+        "targets": [
+          {
+            "expr": "sum by (status) (rate(http_requests_total{job=\"dernier-metro-api\"}[5m]))",
+            "legendFormat": "{{status}}",
+            "refId": "A"
+          }
+        ]
+      },
+      {
+        "id": 7,
+        "title": "🔄 Redis Cache Performance",
+        "type": "graph",
+        "gridPos": {"h": 8, "w": 8, "x": 8, "y": 20},
+        "yAxes": [
+          {"label": "Operations/sec", "min": 0}
+        ],
+        "targets": [
+          {
+            "expr": "rate(redis_commands_processed_total[5m])",
+            "legendFormat": "Commands/sec",
+            "refId": "A"
+          },
+          {
+            "expr": "redis_connected_clients",
+            "legendFormat": "Connected Clients",
+            "refId": "B"
+          }
+        ]
+      },
+      {
+        "id": 8,
+        "title": "⚠️ Active Alerts",
+        "type": "table",
+        "gridPos": {"h": 8, "w": 8, "x": 16, "y": 20},
+        "targets": [
+          {
+            "expr": "ALERTS{alertstate=\"firing\"}",
+            "format": "table",
+            "refId": "A"
+          }
+        ]
+      },
+      {
+        "id": 9,
+        "title": "📈 Top API Endpoints",
+        "type": "table",
+        "gridPos": {"h": 6, "w": 24, "x": 0, "y": 28},
+        "targets": [
+          {
+            "expr": "topk(10, sum by (method, route) (rate(http_requests_total{job=\"dernier-metro-api\"}[5m])))",
+            "format": "table",
+            "refId": "A"
+          }
+        ]
+      }
+    ]
+  }
+}

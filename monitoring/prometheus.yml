@@ -1,0 +1,83 @@
+# Configuration Prometheus - API Dernier Metro Paris
+# Version: 1.0.0
+
+global:
+  scrape_interval: 15s
+  evaluation_interval: 15s
+  external_labels:
+    monitor: 'dernier-metro-api'
+    environment: 'production'
+
+# Règles d'alerte
+rule_files:
+  - "alerts.yml"
+
+# Configuration Alertmanager
+alerting:
+  alertmanagers:
+    - static_configs:
+        - targets:
+          - alertmanager:9093
+
+# Cibles de scraping
+scrape_configs:
+  # === PROMETHEUS SELF-MONITORING ===
+  - job_name: 'prometheus'
+    static_configs:
+      - targets: ['localhost:9090']
+    scrape_interval: 30s
+
+  # === API DERNIER METRO ===
+  - job_name: 'dernier-metro-api'
+    static_configs:
+      - targets: ['api:3000']
+    metrics_path: '/metrics'
+    scrape_interval: 10s
+    scrape_timeout: 5s
+    honor_labels: true
+    
+    # Métriques personnalisées
+    metric_relabel_configs:
+      - source_labels: [__name__]
+        regex: 'go_.*'
+        action: drop
+      - source_labels: [__name__]
+        regex: 'promhttp_.*'
+        action: drop
+
+  # === NGINX REVERSE PROXY ===
+  - job_name: 'nginx'
+    static_configs:
+      - targets: ['nginx:9113']
+    scrape_interval: 10s
+
+  # === POSTGRESQL DATABASE ===
+  - job_name: 'postgres'
+    static_configs:
+      - targets: ['postgres-exporter:9187']
+    scrape_interval: 15s
+
+  # === REDIS CACHE ===
+  - job_name: 'redis'
+    static_configs:
+      - targets: ['redis-exporter:9121']
+    scrape_interval: 15s
+
+  # === NODE EXPORTER (SYSTÈME) ===
+  - job_name: 'node-exporter'
+    static_configs:
+      - targets: ['node-exporter:9100']
+    scrape_interval: 15s
+
+  # === DOCKER CONTAINERS ===
+  - job_name: 'cadvisor'
+    static_configs:
+      - targets: ['cadvisor:8080']
+    scrape_interval: 30s
+
+# Configuration remote write (optionnel - pour Grafana Cloud)
+# remote_write:
+#   - url: https://prometheus-prod-10-prod-us-central-0.grafana.net/api/prom/push
+#     basic_auth:
+#       username: your_username
+#       password: your_api_key

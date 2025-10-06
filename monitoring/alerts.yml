@@ -1,0 +1,184 @@
+# Règles d'alerte Prometheus - API Dernier Metro Paris
+# Version: 1.0.0
+
+groups:
+  # === ALERTES API ===
+  - name: api_alerts
+    rules:
+      # API indisponible
+      - alert: APIDown
+        expr: up{job="dernier-metro-api"} == 0
+        for: 30s
+        labels:
+          severity: critical
+          service: api
+        annotations:
+          summary: "API Dernier Metro indisponible"
+          description: "L'API n'a pas répondu aux health checks depuis 30 secondes"
+          runbook_url: "https://wiki.dernier-metro.fr/runbooks/api-down"
+
+      # Latence élevée
+      - alert: HighLatency
+        expr: histogram_quantile(0.95, rate(http_request_duration_seconds_bucket{job="dernier-metro-api"}[5m])) > 1
+        for: 2m
+        labels:
+          severity: warning
+          service: api
+        annotations:
+          summary: "Latence API élevée"
+          description: "95% des requêtes prennent plus d'1 seconde (valeur: {{ $value }}s)"
+
+      # Taux d'erreur élevé
+      - alert: HighErrorRate
+        expr: rate(http_requests_total{job="dernier-metro-api",status=~"5.."}[5m]) / rate(http_requests_total{job="dernier-metro-api"}[5m]) > 0.05
+        for: 5m
+        labels:
+          severity: warning
+          service: api
+        annotations:
+          summary: "Taux d'erreur API élevé"
+          description: "Plus de 5% d'erreurs 5xx (valeur: {{ $value | humanizePercentage }})"
+
+      # Utilisation CPU élevée
+      - alert: HighCPUUsage
+        expr: rate(process_cpu_seconds_total{job="dernier-metro-api"}[5m]) * 100 > 80
+        for: 5m
+        labels:
+          severity: warning
+          service: api
+        annotations:
+          summary: "Utilisation CPU élevée"
+          description: "Utilisation CPU > 80% (valeur: {{ $value }}%)"
+
+      # Utilisation mémoire élevée
+      - alert: HighMemoryUsage
+        expr: process_resident_memory_bytes{job="dernier-metro-api"} / 1024 / 1024 > 400
+        for: 5m
+        labels:
+          severity: warning
+          service: api
+        annotations:
+          summary: "Utilisation mémoire élevée"
+          description: "Utilisation mémoire > 400MB (valeur: {{ $value }}MB)"
+
+  # === ALERTES BASE DE DONNÉES ===
+  - name: database_alerts
+    rules:
+      # PostgreSQL indisponible
+      - alert: PostgreSQLDown
+        expr: pg_up == 0
+        for: 30s
+        labels:
+          severity: critical
+          service: database
+        annotations:
+          summary: "PostgreSQL indisponible"
+          description: "La base de données PostgreSQL ne répond pas"
+
+      # Trop de connexions
+      - alert: TooManyConnections
+        expr: pg_stat_activity_count / pg_settings_max_connections * 100 > 80
+        for: 5m
+        labels:
+          severity: warning
+          service: database
+        annotations:
+          summary: "Trop de connexions PostgreSQL"
+          description: "Plus de 80% des connexions utilisées ({{ $value }}%)"
+
+      # Espace disque faible
+      - alert: LowDiskSpace
+        expr: pg_database_size_bytes{datname="dernier_metro_prod"} / 1024 / 1024 / 1024 > 8
+        for: 5m
+        labels:
+          severity: warning
+          service: database
+        annotations:
+          summary: "Espace disque base de données faible"
+          description: "Base de données > 8GB (valeur: {{ $value }}GB)"
+
+  # === ALERTES REDIS ===
+  - name: redis_alerts
+    rules:
+      # Redis indisponible
+      - alert: RedisDown
+        expr: redis_up == 0
+        for: 30s
+        labels:
+          severity: warning
+          service: cache
+        annotations:
+          summary: "Redis indisponible"
+          description: "Le cache Redis ne répond pas"
+
+      # Utilisation mémoire Redis élevée
+      - alert: RedisHighMemoryUsage
+        expr: redis_memory_used_bytes / redis_memory_max_bytes * 100 > 90
+        for: 5m
+        labels:
+          severity: warning
+          service: cache
+        annotations:
+          summary: "Utilisation mémoire Redis élevée"
+          description: "Plus de 90% de la mémoire Redis utilisée ({{ $value }}%)"
+
+  # === ALERTES NGINX ===
+  - name: nginx_alerts
+    rules:
+      # Nginx indisponible
+      - alert: NginxDown
+        expr: nginx_up == 0
+        for: 30s
+        labels:
+          severity: critical
+          service: proxy
+        annotations:
+          summary: "Nginx indisponible"
+          description: "Le reverse proxy Nginx ne répond pas"
+
+      # Taux d'erreur élevé Nginx
+      - alert: NginxHighErrorRate
+        expr: rate(nginx_http_requests_total{status=~"5.."}[5m]) / rate(nginx_http_requests_total[5m]) > 0.05
+        for: 5m
+        labels:
+          severity: warning
+          service: proxy
+        annotations:
+          summary: "Taux d'erreur Nginx élevé"
+          description: "Plus de 5% d'erreurs 5xx dans Nginx ({{ $value | humanizePercentage }})"
+
+  # === ALERTES SYSTÈME ===
+  - name: system_alerts
+    rules:
+      # Espace disque faible
+      - alert: LowDiskSpace
+        expr: (node_filesystem_avail_bytes * 100) / node_filesystem_size_bytes < 10
+        for: 5m
+        labels:
+          severity: warning
+          service: system
+        annotations:
+          summary: "Espace disque faible"
+          description: "Moins de 10% d'espace disque disponible sur {{ $labels.mountpoint }}"
+
+      # Charge système élevée
+      - alert: HighSystemLoad
+        expr: node_load1 > 2
+        for: 5m
+        labels:
+          severity: warning
+          service: system
+        annotations:
+          summary: "Charge système élevée"
+          description: "Charge système > 2 (valeur: {{ $value }})"
+
+      # Utilisation mémoire système élevée
+      - alert: HighSystemMemoryUsage
+        expr: (1 - (node_memory_MemAvailable_bytes / node_memory_MemTotal_bytes)) * 100 > 90
+        for: 5m
+        labels:
+          severity: warning
+          service: system
+        annotations:
+          summary: "Utilisation mémoire système élevée"
+          description: "Plus de 90% de la mémoire système utilisée ({{ $value }}%)"
