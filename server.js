@@ -34,19 +34,21 @@ app.use((req, res, next) => {
     const logMessage = `${req.method} ${req.path} - ${res.statusCode} - ${duration}ms`;
     console.log(logMessage);
     
-    // Log asynchrone en base de données
-    logApiRequest(
-      req.method,
-      req.path,
-      res.statusCode,
-      duration,
-      req.get('User-Agent'),
-      req.ip,
-      Object.keys(req.query).length > 0 ? req.query : null,
-      res.statusCode < 400 ? null : JSON.parse(data) // Ne stocker les réponses qu'en cas d'erreur
-    ).catch(err => {
-      console.error('Erreur log BDD:', err.message);
-    });
+    // Log asynchrone en base de données (seulement si pas en test)
+    if (process.env.NODE_ENV !== 'test') {
+      logApiRequest(
+        req.method,
+        req.path,
+        res.statusCode,
+        duration,
+        req.get('User-Agent'),
+        req.ip,
+        Object.keys(req.query).length > 0 ? req.query : null,
+        res.statusCode < 400 ? null : JSON.parse(data) // Ne stocker les réponses qu'en cas d'erreur
+      ).catch(err => {
+        console.error('Erreur log BDD:', err.message);
+      });
+    }
     
     originalSend.call(this, data);
   };
@@ -106,17 +108,24 @@ app.get('/health', async (req, res) => {
  * /next-metro:
  *   get:
  *     summary: Informations sur le prochain métro
- *     description: Retourne les informations sur le prochain passage de métro pour une station donnée avec données réelles de la base
+ *     description: |
+ *       Retourne les informations détaillées sur le prochain passage de métro pour une station donnée.
+ *       
+ *       **Fonctionnalités:**
+ *       - Recherche insensible à la casse et aux accents
+ *       - Calcul des horaires en temps réel
+ *       - Détection automatique du type de jour (semaine/samedi/dimanche)
+ *       - Suggestions en cas de station non trouvée
+ *       
+ *       **Horaires de service simulés:**
+ *       - Semaine: 05:30 → 01:15 (fréquence 3min)
+ *       - Samedi: 06:00 → 02:15 (fréquence 4min)  
+ *       - Dimanche: 07:00 → 01:15 (fréquence 5min)
+ *       - Dernier métro: marqué entre 00:45 et heure de fin
  *     tags:
  *       - Metro
  *     parameters:
- *       - in: query
- *         name: station
- *         required: true
- *         description: Nom ou slug de la station de métro
- *         schema:
- *           type: string
- *           example: chatelet
+ *       - $ref: '#/components/parameters/StationParam'
  *     responses:
  *       200:
  *         description: Informations sur le prochain métro
@@ -127,18 +136,20 @@ app.get('/health', async (req, res) => {
  *                 - $ref: '#/components/schemas/MetroResponse'
  *                 - $ref: '#/components/schemas/MetroClosedResponse'
  *             examples:
- *               service_ouvert:
- *                 summary: Service ouvert
+ *               service_ouvert_jour:
+ *                 summary: Service ouvert en journée
  *                 value:
  *                   station: "Châtelet"
  *                   line: "M1"
  *                   headwayMin: 3
- *                   nextArrival: "12:34"
+ *                   nextArrival: "14:37"
  *                   isLast: false
  *                   tz: "Europe/Paris"
  *                   dayType: "weekday"
+ *                   zone: 1
+ *                   accessibility: true
  *               dernier_metro:
- *                 summary: Dernier métro (entre 00:45 et 01:15)
+ *                 summary: Dernier métro de la nuit
  *                 value:
  *                   station: "Châtelet"
  *                   line: "M1"
@@ -147,13 +158,27 @@ app.get('/health', async (req, res) => {
  *                   isLast: true
  *                   tz: "Europe/Paris"
  *                   dayType: "weekday"
+ *                   zone: 1
+ *                   accessibility: true
  *               service_ferme:
- *                 summary: Service fermé (après 01:15)
+ *                 summary: Service fermé
  *                 value:
  *                   station: "Châtelet"
  *                   line: "M1"
  *                   service: "closed"
  *                   tz: "Europe/Paris"
+ *               weekend_samedi:
+ *                 summary: Service samedi (horaires étendus)
+ *                 value:
+ *                   station: "Châtelet"
+ *                   line: "M1"
+ *                   headwayMin: 4
+ *                   nextArrival: "01:50"
+ *                   isLast: true
+ *                   tz: "Europe/Paris"
+ *                   dayType: "saturday"
+ *                   zone: 1
+ *                   accessibility: true
  *       400:
  *         description: Paramètre station manquant
  *         content:
@@ -163,21 +188,28 @@ app.get('/health', async (req, res) => {
  *             example:
  *               error: "missing station"
  *       404:
- *         description: Station non trouvée
+ *         description: Station non trouvée avec suggestions
  *         content:
  *           application/json:
  *             schema:
- *               type: object
- *               properties:
- *                 error:
- *                   type: string
- *                 suggestions:
- *                   type: array
- *                   items:
- *                     type: string
- *             example:
- *               error: "unknown station"
- *               suggestions: ["Châtelet", "Champs-Élysées"]
+ *               $ref: '#/components/schemas/NotFoundResponse'
+ *             examples:
+ *               station_partielle:
+ *                 summary: Recherche partielle
+ *                 value:
+ *                   error: "unknown station"
+ *                   suggestions: ["Châtelet", "Champs-Élysées"]
+ *               aucune_suggestion:
+ *                 summary: Aucune station similaire
+ *                 value:
+ *                   error: "unknown station"
+ *                   suggestions: []
+ *       500:
+ *         description: Erreur serveur interne
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/ErrorResponse'
  */
 // Route principale pour les infos métro avec base de données
 app.get('/next-metro', async (req, res) => {
@@ -244,32 +276,33 @@ app.get('/next-metro', async (req, res) => {
  * /stations:
  *   get:
  *     summary: Liste des stations de métro
- *     description: Retourne la liste de toutes les stations disponibles
+ *     description: Retourne la liste complète de toutes les stations disponibles avec leurs informations
  *     tags:
  *       - Metro
  *     responses:
  *       200:
- *         description: Liste des stations
+ *         description: Liste des stations récupérée avec succès
  *         content:
  *           application/json:
  *             schema:
- *               type: object
- *               properties:
- *                 stations:
- *                   type: array
- *                   items:
- *                     type: object
- *                     properties:
- *                       name:
- *                         type: string
- *                       slug:
- *                         type: string
- *                       zone:
- *                         type: integer
- *                       accessibility:
- *                         type: boolean
- *                 count:
- *                   type: integer
+ *               $ref: '#/components/schemas/StationListResponse'
+ *             example:
+ *               stations:
+ *                 - name: "Châtelet"
+ *                   slug: "chatelet"
+ *                   zone: 1
+ *                   accessibility: true
+ *                 - name: "Concorde"
+ *                   slug: "concorde"
+ *                   zone: 1
+ *                   accessibility: true
+ *               count: 12
+ *       500:
+ *         description: Erreur serveur interne
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/ErrorResponse'
  */
 // Route pour lister les stations
 app.get('/stations', async (req, res) => {
@@ -329,3 +362,6 @@ process.on('SIGINT', async () => {
     process.exit(0);
   });
 });
+
+// Export pour les tests
+module.exports = app;

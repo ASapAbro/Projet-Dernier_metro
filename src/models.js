@@ -132,10 +132,22 @@ class ScheduleModel {
     const tz = 'Europe/Paris';
     const toHM = d => String(d.getHours()).padStart(2,'0') + ':' + String(d.getMinutes()).padStart(2,'0');
     
+    // Gestion correcte des heures de nuit : 01:15 = le lendemain matin si on est l'après-midi/soirée
     const end = new Date(now); 
     end.setHours(1, 15, 0, 0);
+    
+    // Si on est après 02:00 dans la journée, l'heure de fin est le lendemain
+    if (now.getHours() >= 2) {
+      end.setDate(end.getDate() + 1);
+    }
+    
     const lastWindow = new Date(now); 
     lastWindow.setHours(0, 45, 0, 0);
+    
+    // Si on est après 02:00, la fenêtre de dernier métro est le lendemain
+    if (now.getHours() >= 2) {
+      lastWindow.setDate(lastWindow.getDate() + 1);
+    }
     
     if (now > end) {
       return { service: 'closed', tz };

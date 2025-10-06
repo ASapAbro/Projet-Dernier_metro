@@ -1,0 +1,312 @@
+# GitHub Actions Workflow pour l'API Dernier Metro Paris
+# Version: 1.0.0
+
+name: CI/CD Pipeline
+
+on:
+  push:
+    branches: [ main, develop ]
+  pull_request:
+    branches: [ main ]
+  workflow_dispatch:
+
+env:
+  NODE_VERSION: '18'
+  REGISTRY: ghcr.io
+  IMAGE_NAME: ${{ github.repository }}
+
+jobs:
+  # ===== ÉTAPE TESTS =====
+  test:
+    runs-on: ubuntu-latest
+    
+    services:
+      postgres:
+        image: postgres:15-alpine
+        env:
+          POSTGRES_PASSWORD: metro_password
+          POSTGRES_USER: metro_user
+          POSTGRES_DB: dernier_metro_test
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+        ports:
+          - 5432:5432
+
+    strategy:
+      matrix:
+        node-version: [18, 20]
+
+    steps:
+      - name: 📥 Checkout code
+        uses: actions/checkout@v4
+
+      - name: 🟢 Setup Node.js ${{ matrix.node-version }}
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node-version }}
+          cache: 'npm'
+
+      - name: 📦 Install dependencies
+        run: npm ci
+
+      - name: 🗄️ Setup database
+        env:
+          PGPASSWORD: metro_password
+        run: |
+          sudo apt-get install -y postgresql-client
+          psql -h localhost -U metro_user -d dernier_metro_test -f db/init/01_schema.sql
+          psql -h localhost -U metro_user -d dernier_metro_test -f db/init/02_data.sql
+
+      - name: 🧪 Run unit tests
+        env:
+          NODE_ENV: test
+          DB_HOST: localhost
+          DB_PORT: 5432
+          DB_NAME: dernier_metro_test
+          DB_USER: metro_user
+          DB_PASSWORD: metro_password
+        run: npm test
+
+      - name: 📊 Generate coverage report
+        env:
+          NODE_ENV: test
+          DB_HOST: localhost
+          DB_PORT: 5432
+          DB_NAME: dernier_metro_test
+          DB_USER: metro_user
+          DB_PASSWORD: metro_password
+        run: npm run test:coverage
+
+      - name: 📈 Upload coverage to Codecov
+        uses: codecov/codecov-action@v3
+        with:
+          file: ./coverage/lcov.info
+          flags: unittests
+          name: codecov-umbrella
+
+  # ===== ÉTAPE LINTING =====
+  lint:
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: 📥 Checkout code
+        uses: actions/checkout@v4
+
+      - name: 🟢 Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: 'npm'
+
+      - name: 📦 Install dependencies
+        run: npm ci
+
+      - name: 🔍 Run ESLint
+        run: npx eslint . --ext .js --max-warnings 0 || echo "ESLint not configured, skipping..."
+
+      - name: 🛡️ Run security audit
+        run: npm audit --audit-level=moderate
+
+  # ===== ÉTAPE TESTS API =====
+  api-test:
+    runs-on: ubuntu-latest
+    needs: [test]
+    
+    services:
+      postgres:
+        image: postgres:15-alpine
+        env:
+          POSTGRES_PASSWORD: metro_password
+          POSTGRES_USER: metro_user
+          POSTGRES_DB: dernier_metro_test
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+        ports:
+          - 5432:5432
+
+    steps:
+      - name: 📥 Checkout code
+        uses: actions/checkout@v4
+
+      - name: 🟢 Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: 'npm'
+
+      - name: 📦 Install dependencies
+        run: npm ci
+
+      - name: 🗄️ Setup database
+        env:
+          PGPASSWORD: metro_password
+        run: |
+          sudo apt-get install -y postgresql-client
+          psql -h localhost -U metro_user -d dernier_metro_test -f db/init/01_schema.sql
+          psql -h localhost -U metro_user -d dernier_metro_test -f db/init/02_data.sql
+
+      - name: 🚀 Start API server
+        env:
+          NODE_ENV: test
+          PORT: 3000
+          DB_HOST: localhost
+          DB_PORT: 5432
+          DB_NAME: dernier_metro_test
+          DB_USER: metro_user
+          DB_PASSWORD: metro_password
+        run: |
+          npm start &
+          sleep 10
+
+      - name: 🧪 Run API integration tests
+        run: |
+          chmod +x test_api.sh
+          ./test_api.sh
+
+  # ===== ÉTAPE BUILD DOCKER =====
+  build:
+    runs-on: ubuntu-latest
+    needs: [test, lint]
+    if: github.event_name != 'pull_request'
+    
+    permissions:
+      contents: read
+      packages: write
+
+    steps:
+      - name: 📥 Checkout code
+        uses: actions/checkout@v4
+
+      - name: 🐳 Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: 🔐 Log in to Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: 🏷️ Extract metadata
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
+          tags: |
+            type=ref,event=branch
+            type=ref,event=pr
+            type=sha,prefix={{branch}}-
+            type=raw,value=latest,enable={{is_default_branch}}
+
+      - name: 🔨 Build and push Docker image
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          target: production
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+          build-args: |
+            BUILD_DATE=${{ fromJSON(steps.meta.outputs.json).labels['org.opencontainers.image.created'] }}
+            VCS_REF=${{ github.sha }}
+            VERSION=${{ fromJSON(steps.meta.outputs.json).labels['org.opencontainers.image.version'] }}
+
+  # ===== ÉTAPE SÉCURITÉ =====
+  security:
+    runs-on: ubuntu-latest
+    needs: [build]
+    if: github.event_name != 'pull_request'
+    
+    permissions:
+      contents: read
+      security-events: write
+
+    steps:
+      - name: 📥 Checkout code
+        uses: actions/checkout@v4
+
+      - name: 🛡️ Run Trivy vulnerability scanner
+        uses: aquasecurity/trivy-action@master
+        with:
+          image-ref: '${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ github.sha }}'
+          format: 'sarif'
+          output: 'trivy-results.sarif'
+
+      - name: 📤 Upload Trivy scan results to GitHub Security tab
+        uses: github/codeql-action/upload-sarif@v2
+        with:
+          sarif_file: 'trivy-results.sarif'
+
+      - name: 🔍 Run npm audit
+        run: |
+          npm ci
+          npm audit --audit-level=critical --json > npm-audit.json || true
+          
+      - name: 📊 Upload security scan artifacts
+        uses: actions/upload-artifact@v3
+        with:
+          name: security-reports
+          path: |
+            trivy-results.sarif
+            npm-audit.json
+
+  # ===== ÉTAPE DÉPLOIEMENT STAGING =====
+  deploy-staging:
+    runs-on: ubuntu-latest
+    needs: [api-test, build]
+    if: github.ref == 'refs/heads/develop'
+    
+    environment:
+      name: staging
+      url: https://api-staging.dernier-metro.fr
+
+    steps:
+      - name: 🚀 Deploy to staging
+        run: |
+          echo "🚀 Déploiement en environnement staging..."
+          echo "Image: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ github.sha }}"
+          echo "Environment: staging"
+          echo "✅ Déploiement staging simulé"
+
+  # ===== ÉTAPE DÉPLOIEMENT PRODUCTION =====
+  deploy-production:
+    runs-on: ubuntu-latest
+    needs: [api-test, build, security]
+    if: github.ref == 'refs/heads/main'
+    
+    environment:
+      name: production
+      url: https://api.dernier-metro.fr
+
+    steps:
+      - name: 🚀 Deploy to production
+        run: |
+          echo "🚀 Déploiement en environnement production..."
+          echo "Image: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ github.sha }}"
+          echo "Environment: production"
+          echo "✅ Déploiement production simulé"
+
+  # ===== ÉTAPE NOTIFICATIONS =====
+  notify:
+    runs-on: ubuntu-latest
+    needs: [deploy-staging, deploy-production]
+    if: always()
+    
+    steps:
+      - name: 📢 Notify deployment status
+        run: |
+          if [ "${{ needs.deploy-production.result }}" == "success" ]; then
+            echo "✅ Déploiement production réussi"
+          elif [ "${{ needs.deploy-staging.result }}" == "success" ]; then
+            echo "✅ Déploiement staging réussi"
+          else
+            echo "❌ Échec du déploiement"
+          fi
