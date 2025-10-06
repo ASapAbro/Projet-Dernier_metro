@@ -1,0 +1,20 @@
+# Utilisation de Node.js 18 Alpine pour une image légère
+FROM node:18-alpine
+
+# Définition du répertoire de travail
+WORKDIR /app
+
+# Copie des fichiers de dépendances
+COPY package*.json ./
+
+# Installation des dépendances
+RUN npm install --only=production
+
+# Copie du code source
+COPY . .
+
+# Exposition du port
+EXPOSE 3000
+
+# Commande de démarrage
+CMD ["node", "server.js"]

@@ -1,0 +1,20 @@
+{
+  "name": "dernier-metro-paris",
+  "version": "1.0.0",
+  "description": "API pour savoir si on peut attraper le dernier métro à Paris",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js",
+    "dev": "node server.js"
+  },
+  "keywords": ["metro", "paris", "api", "express"],
+  "author": "",
+  "license": "MIT",
+  "dependencies": {
+    "express": "^4.18.2",
+    "swagger-ui-express": "^5.0.0",
+    "swagger-jsdoc": "^6.2.8",
+    "pg": "^8.11.3",
+    "pg-pool": "^3.6.1"
+  }
+}

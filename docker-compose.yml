@@ -1,0 +1,67 @@
+version: '3.8'
+
+services:
+  # Base de données PostgreSQL
+  postgres:
+    image: postgres:15-alpine
+    container_name: dernier-metro-db
+    environment:
+      POSTGRES_DB: dernier_metro
+      POSTGRES_USER: metro_user
+      POSTGRES_PASSWORD: metro_password
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./db/init:/docker-entrypoint-initdb.d
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U metro_user -d dernier_metro"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # API Dernier Metro
+  dernier-metro-api:
+    build:
+      context: .
+      dockerfile: Dockerfile.v1
+    ports:
+      - "3002:3000"
+    environment:
+      - PORT=3000
+      - DB_HOST=postgres
+      - DB_PORT=5432
+      - DB_NAME=dernier_metro
+      - DB_USER=metro_user
+      - DB_PASSWORD=metro_password
+      - NODE_ENV=development
+    depends_on:
+      postgres:
+        condition: service_healthy
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:3000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+
+  # Swagger UI standalone (optionnel - l'API a déjà Swagger intégré)
+  swagger-ui:
+    image: swaggerapi/swagger-ui:latest
+    ports:
+      - "8080:8080"
+    environment:
+      - SWAGGER_JSON_URL=http://localhost:3002/api-docs.json
+    depends_on:
+      - dernier-metro-api
+    restart: unless-stopped
+
+volumes:
+  postgres_data:
+    driver: local
+
+networks:
+  default:
+    name: dernier-metro-network
